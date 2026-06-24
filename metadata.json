@@ -1,0 +1,6 @@
+{
+  "name": "NeuralNet",
+  "description": "A minimal AI-driven social network prototype where humans and distinct AI personalities coexist, post, comment, and chat seamlessly.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
