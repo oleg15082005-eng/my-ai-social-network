@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Home, Globe, MessageSquare, Plus, Send, Heart, UserPlus, UserCheck, Bot, User as UserIcon, RefreshCw, Loader } from 'lucide-react';
+import { Home, Globe, MessageSquare, Plus, Send, Heart, UserPlus, UserCheck, Bot, User as UserIcon, RefreshCw, Loader, Settings } from 'lucide-react';
 import { motion } from 'motion/react';
 
 // --- TYPES ---
@@ -43,15 +43,21 @@ function useDB() {
   return db;
 }
 
-// --- LOCAL AI ENGINE ---
-const LOCAL_AI_URL = 'http://127.0.0.1:1337/v1/chat/completions';
+// --- CONFIGURATION ---
+export const aiConfig = {
+  get url() { return localStorage.getItem('ai_url') || 'http://127.0.0.1:1337/v1/chat/completions'; },
+  set url(v: string) { localStorage.setItem('ai_url', v); },
+  get model() { return localStorage.getItem('ai_model') || 'L3-8B-Stheno-v3.2-Q4_K_M-imat'; },
+  set model(v: string) { localStorage.setItem('ai_model', v); },
+};
 
+// --- LOCAL AI ENGINE ---
 async function callLocalAI(system: string, user: string) {
-  const res = await fetch(LOCAL_AI_URL, {
+  const res = await fetch(aiConfig.url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: "L3-8B-Stheno-v3.2-Q4_K_M-imat", // local model or omit
+      model: aiConfig.model,
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: user }
@@ -168,7 +174,7 @@ ONLY valid JSON: { "content": "your post text" }`;
 
 // --- MAIN APP COMPONENT ---
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'feed' | 'discover' | 'chat' | 'profile'>('discover');
+  const [activeTab, setActiveTab] = useState<'feed' | 'discover' | 'chat' | 'profile' | 'settings'>('discover');
   const database = useDB();
   const me = database.getUser(HUMAN_ID)!;
   const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
@@ -193,6 +199,7 @@ export default function App() {
           <NavButton icon={<Globe size={24}/>} label="Discover" active={activeTab === 'discover'} onClick={() => setActiveTab('discover')} />
           <NavButton icon={<Home size={24}/>} label="Feed" active={activeTab === 'feed'} onClick={() => setActiveTab('feed')} />
           <NavButton icon={<MessageSquare size={24}/>} label="Messages" active={activeTab === 'chat'} onClick={() => setActiveTab('chat')} />
+          <NavButton icon={<Settings size={24}/>} label="Settings" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
         </div>
 
         <button onClick={() => setActiveTab('profile')} className={`mt-auto hidden md:flex items-center gap-3 p-3 rounded-xl w-full text-left transition-colors ${activeTab === 'profile' ? 'bg-indigo-600/20 text-indigo-100' : 'bg-zinc-800/50 hover:bg-zinc-800'}`}>
@@ -210,6 +217,7 @@ export default function App() {
         {activeTab === 'feed' && <FeedView me={me} onOpenChat={openChat} />}
         {activeTab === 'chat' && <ChatView me={me} selectedBotId={selectedBotId} initialContext={initialChatContext} onClearContext={() => setInitialChatContext('')} />}
         {activeTab === 'profile' && <ProfileView me={me} onOpenChat={openChat} />}
+        {activeTab === 'settings' && <SettingsView />}
       </main>
     </div>
   );
@@ -631,3 +639,122 @@ function ProfileView({ me, onOpenChat }: { me: User, onOpenChat: (id: string, ct
     </div>
   );
 }
+
+// --- SETTINGS VIEW ---
+function SettingsView() {
+  const [url, setUrl] = useState(aiConfig.url);
+  const [model, setModel] = useState(aiConfig.model);
+  const [saved, setSaved] = useState(false);
+  const [models, setModels] = useState<{id: string}[]>([]);
+  const [status, setStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (url) checkConnection(url);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [url]);
+
+  const checkConnection = async (testUrl: string) => {
+    setStatus('testing');
+    try {
+      const modelsUrl = testUrl.replace(/\/chat\/completions\/?$/, '/models');
+      const res = await fetch(modelsUrl);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data && Array.isArray(data.data)) {
+        setModels(data.data);
+        setStatus('success');
+      } else {
+        setModels([]);
+        setStatus('error');
+      }
+    } catch (e) {
+      setModels([]);
+      setStatus('error');
+    }
+  };
+
+  const handleSave = (e: React.FormEvent) => {
+    e.preventDefault();
+    aiConfig.url = url;
+    aiConfig.model = model;
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
+  };
+
+  return (
+    <div className="h-full overflow-y-auto p-4 md:p-8 bg-zinc-950">
+      <div className="max-w-2xl mx-auto">
+        <h2 className="text-3xl font-bold mb-8 text-zinc-100">AI Connection Settings</h2>
+        
+        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl shadow-xl">
+          <p className="text-zinc-400 mb-6 text-sm">
+            Configure your local AI endpoint (e.g., Jan, LM Studio, Ollama). 
+            Make sure your local server is running and has CORS enabled so this app can communicate with it.
+          </p>
+
+          <form onSubmit={handleSave} className="space-y-6">
+            <div>
+              <div className="flex justify-between items-end mb-2">
+                <label className="block text-sm font-medium text-zinc-300">Local API URL (chat/completions endpoint)</label>
+                <span className="text-xs font-medium px-2 py-1 rounded bg-zinc-950">
+                  {status === 'testing' && <span className="text-zinc-400">Testing...</span>}
+                  {status === 'success' && <span className="text-emerald-400">Connected</span>}
+                  {status === 'error' && <span className="text-red-400">Disconnected</span>}
+                </span>
+              </div>
+              <input
+                type="text"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                className="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl p-3 focus:outline-none focus:border-indigo-500 transition-colors font-mono text-sm"
+                placeholder="http://127.0.0.1:1337/v1/chat/completions"
+                required
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-zinc-300 mb-2">Model</label>
+              {status === 'success' && models.length > 0 ? (
+                <select
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  className="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl p-3 focus:outline-none focus:border-indigo-500 transition-colors font-mono text-sm"
+                >
+                  <option value="" disabled>Select a model...</option>
+                  {models.map(m => (
+                    <option key={m.id} value={m.id}>{m.id}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  className="w-full bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl p-3 focus:outline-none focus:border-indigo-500 transition-colors font-mono text-sm"
+                  placeholder="L3-8B-Stheno-v3.2-Q4_K_M-imat"
+                  required
+                />
+              )}
+              {status === 'error' && (
+                 <p className="text-xs text-red-400/80 mt-2">Could not fetch model list. You can still enter the model name manually.</p>
+              )}
+            </div>
+
+            <div className="pt-4 flex items-center justify-between">
+              <button 
+                type="submit" 
+                className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2.5 rounded-xl font-medium transition-colors"
+              >
+                Save Connection Settings
+              </button>
+              {saved && <span className="text-emerald-400 font-medium text-sm flex items-center gap-2">✓ Saved successfully</span>}
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
